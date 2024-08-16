@@ -1,0 +1,1430 @@
+---
+title: "MS4S09 ASSIGNMENT - AMAZON BOOK REVIEW ANALYSIS (30074879)"
+author: "Gabriel Obot "
+student number: "30074879"
+date: "19/02/2024"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+dataset: MS4S09_CW_Book_Reviews.csv
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+# Task A – Text Mining 
+
+
+### Load the neccesary libraries
+```{r install_Libraries}
+libraries <- c("tm", "tidytext", "ggplot2", "wordcloud", "syuzhet", "dplyr", "tibble", "textstem", "textdata", "tidyr", "Matrix", "topicmodels", "stringr", "reshape2", "LDAvis", "jsonlite")
+
+#install.packages(libraries)
+
+for (lib in libraries) { 
+  library(lib, character.only=TRUE) #Library takes function names without quotes, character only must be used in a loop of this kind.
+}
+```
+```{R }
+
+library(tibble)
+```
+
+```{R }
+library(dplyr)
+```
+
+
+
+### Load the data to a data frame and print summary and dimension
+```{r Load_Data set}
+filepath <- 'C:\\Users\\Gabriel Obot\\Desktop\\R-Data mining course work\\MS4S09_CW_Book_Reviews.csv'
+df <- as_tibble(read.csv(filepath, stringsAsFactors = FALSE)) # Since we have text data we do not want this read as a factor
+print(summary(df))
+```
+### Inspect data
+```{r }
+print(head(df))
+
+```
+
+### Select relevant Data 
+```{R select_sata}
+
+# Select the desired columns
+df<- df %>%
+  select(Title, Book_Price, Reviewer_id, Rating, Review_title, 
+         Review_text, Found_helpful_ratio, Publisher, First_author, Genre)
+
+df <- na.omit(df) # Removes all rows containing null values
+
+
+df$Review_no <- 1:nrow(df)
+
+dim(df)
+```
+
+
+### Count number of reviews by Title and sort
+```{R }
+Title_counts <- count(df,Title, sort=TRUE) # Count number of reviews by Title and sort
+head(Title_counts) # Print top 5 most reviewed Titles
+
+```
+
+
+### Sample the data to use for analysis: print the summary and dimension
+```{R }
+set.seed(1)
+
+# Take sample of 5 Titles
+sample_index<- sample(length(unique(df$Title)), 10) #Sample (Size of population, Size of sample), returns index for sample
+
+# Take Title at index defined previously
+sampled_titles <- unique(df$Title)[sample_index] 
+
+# Select only rows where restaurant is one of sampled_titles
+df <- df %>%
+  filter(Title %in% sampled_titles) 
+
+print(summary(df))
+
+ 
+print(dim(df))
+```
+
+
+
+### Tokenize Review_text
+```{R }
+# Tokenize word column by word
+library(tidytext)
+word_tokenized_data <- df %>%
+  unnest_tokens(output = word, input = "Review_text", token = "words", to_lower = TRUE) 
+
+# Tokenize word column to bigrams
+bigram_tokenized_data <- df %>%
+  unnest_tokens(output = bigram, input = "Review_text", token = "ngrams", n=2, to_lower = TRUE) 
+```
+
+
+### Plot of top 10 words before cleaning of the review_text columns shows that 
+### the top words are mostly stop words
+```{R }
+library(ggplot2)
+
+word_counts <- word_tokenized_data %>%
+  count(word, sort = TRUE)
+
+ggplot(word_counts[1:10, ], aes(x = reorder(word, n), y = n)) +
+  geom_col(fill = "green") +
+  labs(x = "Words", y = "Frequency") +
+  coord_flip() +
+  theme_minimal()
+```
+
+
+### Word cloud before cleaning review_text shows that the stop words 
+### are mostly stop words
+```{R }
+library(wordcloud)
+
+set.seed(1)
+wordcloud(words = word_counts$word, freq = word_counts$n, min.freq = 5, random.order=FALSE, random.color=FALSE, colors = sample(colors(), size = 15))
+
+```
+
+### Plot of top 10 bigrams also shows that bigrams consist of stop words
+``` {R }
+
+# Plot of top 10 bigrams
+bigram_counts <- bigram_tokenized_data %>%
+  count(bigram, sort = TRUE)
+
+ggplot(bigram_counts[1:10, ], aes(x = reorder(bigram, n), y = n)) +
+  geom_col(fill = "green") +
+  labs(x = "Bigrams", y = "Frequency") +
+  coord_flip() +
+  theme_minimal()
+```
+
+
+```{R }
+install.packages("textstem")
+library(textstem)
+
+```
+```{R }
+library(magrittr)
+
+```
+
+
+#### Cleaning Data
+```{R }
+# Load necessary packages
+library(dplyr)
+library(tidytext)
+library(textstem)  
+
+# Clean tokens and lemmatize
+clean_tokens <- word_tokenized_data %>%
+  anti_join(stop_words, by = "word") %>%
+  mutate(word = gsub("[^a-zA-Z ]", "", word),  # Remove special characters and numbers
+         word = na_if(word, "")) %>%  # Replace empty strings with NA
+  filter(!is.na(word)) %>%  # Remove NA values
+  mutate(word = lemmatize_words(word))  # Lemmatize text
+
+# Untokenize and retokenize to get cleaned bigrams
+untokenized_data <- clean_tokens %>%
+  group_by(Review_no) %>%
+  summarize(clean_review = paste(word, collapse = " ")) %>%
+  inner_join(df, by = "Review_no")  # Adjust column selection if necessary
+
+# Create bigrams from cleaned text
+clean_bigrams <- untokenized_data %>%
+  unnest_tokens(output = bigram, input = clean_review, token = "ngrams", n = 2, to_lower = TRUE)
+
+```
+
+
+
+#### Top 10 Words After Cleaning
+```{R }
+word_counts <- clean_tokens %>%
+  count(word, sort = TRUE)
+
+top_words <- top_n(word_counts,10,n)$word
+
+filtered_word_counts <- filter(word_counts, word %in% top_words)
+filtered_word_counts$word <- factor(filtered_word_counts$word, levels = top_words[length(top_words):1])
+
+ggplot(filtered_word_counts, aes(x = reorder(word, n), y = n)) +
+  geom_col(fill = "Purple") +
+  labs(x = "Words", y = "Frequency") +
+  coord_flip() +
+  theme_minimal()
+```
+
+#### Top 10 Bigrams After Cleaning
+```{R }
+bigram_counts <- clean_bigrams %>%
+  count(bigram, sort = TRUE)
+
+top_bigrams <- top_n(bigram_counts,10,n)$bigram
+
+filtered_bigram_counts <- filter(bigram_counts, bigram %in% top_bigrams)
+filtered_bigram_counts$bigram <- factor(filtered_bigram_counts$bigram, levels = top_bigrams[length(top_bigrams):1])
+
+ggplot(filtered_bigram_counts, aes(x = reorder(bigram, n), y = n)) +
+  geom_col(fill = "purple") +
+  labs(x = "Bigrams", y = "Frequency") +
+  coord_flip() +
+  theme_minimal()
+```
+
+
+
+#### Plot the top 10 words by Title
+```{R }
+# Function to get top words for each title
+top_words_per_title <- clean_tokens %>%
+  group_by(Title, word) %>%
+  count() %>%
+  arrange(Title, desc(n)) %>%
+  group_by(Title) %>%
+  slice_head(n = 10) %>%
+  ungroup()
+
+# Ensure 'word' is a factor with the desired levels
+top_words_per_title$word <- factor(top_words_per_title$word, levels = rev(top_words))
+
+# Shorten Title if Necessary
+top_words_per_title$Short_Title <- stringr::str_wrap(top_words_per_title$Title, width = 50)
+
+# Plotting
+ggplot(data = top_words_per_title, aes(x = word, y = n, fill = Short_Title)) +
+  geom_col(position = "dodge") +
+  labs(x = "Words", y = "Frequency", fill = "Title") +
+  coord_flip() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_fill_discrete(name = "Title")  # Rename fill legend
+
+
+```
+
+
+#### Top 10 Bigrams by Title
+```{R }
+# Grouped Bigrams
+top_bigrams <- top_n(bigram_counts,10,n)$bigram
+
+grouped_count <- group_by(clean_bigrams, Title) %>%
+  count(bigram) %>%
+  filter(bigram %in% top_bigrams)
+
+grouped_count$bigram <- factor(grouped_count$bigram, levels = top_bigrams[length(top_bigrams):1])
+
+ggplot(data = grouped_count, aes(x = bigram, y = n, fill = Title)) +
+  geom_col(position = "dodge") +
+  labs(x = "Bigrams", y = "Title", fill = "Title") +
+  coord_flip() +
+  theme_minimal()
+
+```
+
+#Creating Word Cloud
+```{R }
+library(wordcloud)
+
+set.seed(1)
+wordcloud(words = word_counts$word, freq = word_counts$n, min.freq = 5, random.order=FALSE, random.color=FALSE, colors = sample(colors(), size = 20))
+
+```
+
+
+
+# Task 2: Sentiment Analysis
+<p>In this task, we explored different ways to understand the emotions behind text using three techniques: AFINN, NRC, and Bing lexicons. AFINN gives scores to words based on their emotional tone, helping us classify sentiment. The NRC lexicon, developed by experts, categorizes words into emotional groups, giving us a detailed view of sentiment. Meanwhile, Bing lexicon is simpler, just labeling words as positive or negative. <br> By using these techniques together, we gained valuable tools to understand emotions in text better. It's like having a powerful emotional radar to navigate through written content, making it easier to understand what people are feeling.</p>
+
+#### The bing Lexicon
+```{R }
+bing_sentiments <- get_sentiments("bing")
+
+summary(bing_sentiments)
+```
+
+
+```{R }
+print(unique(bing_sentiments$sentiment))
+```
+
+```{R }
+set.seed(1)
+bing_sentiments[sample(nrow(bing_sentiments), 5),]
+```
+
+#### AFINN lexicon
+```{R }
+afinn_sentiments <- get_sentiments("afinn")
+
+summary(afinn_sentiments)
+```
+
+```{R }
+set.seed(1)
+afinn_sentiments[sample(nrow(afinn_sentiments), 5),]
+```
+
+
+#### The NRC lexicon 
+```{R }
+nrc_sentiments <- get_sentiments("nrc")
+
+summary(nrc_sentiments)
+```
+
+
+
+```{R }
+head(nrc_sentiments)
+```
+
+
+```{R }
+print(unique(nrc_sentiments$sentiment))
+```
+
+
+
+## Applying bing lexicon
+```{R }
+ #Create dataset containing only words with associated sentiment & adds sentiment column.
+sentiment_data <- clean_tokens %>%
+  inner_join(get_sentiments("bing"), by = "word")
+
+# Calculate Sentiment scores for each review
+sentiment_score <- sentiment_data %>%
+  group_by(Review_no) %>%
+  summarize(bing_sentiment = sum(sentiment == "positive") - sum(sentiment == "negative"))
+
+# Merge with df
+df_with_sentiment = df %>%
+  inner_join(sentiment_score, by = "Review_no")
+```
+
+
+#### worst reviews
+```{R }
+worst_reviews = df_with_sentiment[order(df_with_sentiment$bing_sentiment)[1],"Review_text"]
+
+for (review in worst_reviews){
+  print(review)
+}
+
+```
+
+#### Best review
+```{R }
+best_reviews = df_with_sentiment[order(df_with_sentiment$bing_sentiment, decreasing = TRUE)[1],"Review_text"]
+
+for (review in best_reviews){
+  print(review)
+}
+
+```
+
+
+#### Histogram of bing sentiment score
+```{R }
+# Histogram of sentiment scores
+ggplot(df_with_sentiment, aes(x = bing_sentiment)) +
+  geom_histogram(binwidth = 1)
+```
+
+
+
+#### Average Bing sentiment score by title
+```{R }
+
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(stringr)  # For str_wrap function
+
+
+
+# Average Sentiment by Title
+title_sentiment <- df_with_sentiment %>%
+  group_by(Title) %>%
+  summarize(Average_Bing_Sentiment = mean(bing_sentiment, na.rm = TRUE))
+
+# Shorten titles
+title_sentiment$Short_Title <- str_wrap(title_sentiment$Title, width = 29)  # Adjust width as needed
+
+# Plotting with adjusted dimensions and shortened titles
+ggplot(title_sentiment, aes(x = reorder(Short_Title, Average_Bing_Sentiment), y = Average_Bing_Sentiment, fill = Short_Title)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Average Bing Sentiment Score by Title", x = "Title", y = "Average Sentiment Score") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 7.5))  # Adjust the size of the axis text
+
+
+```
+
+
+
+#### dot plot of sentiment score vs rating 
+```{R }
+
+# Plotting sentiment score vs. rating with increased dot size
+ggplot(df_with_sentiment, aes(x = Rating, y = bing_sentiment)) +
+  geom_point(color = "darkgreen", size = 2) +  # Increased dot size
+  labs(title = "Bing Sentiment Score vs. Rating", x = "Rating", y = "Sentiment Score")
+
+
+```
+
+
+
+## Applying AFINN lexicon
+```{R }
+# Create dataset containing only words with associated sentiment & adds sentiment column.
+sentiment_data <- clean_tokens %>%
+  inner_join(get_sentiments("afinn"), by = "word")
+
+# Calculate Sentiment scores for each review
+sentiment_score <- sentiment_data %>%
+  group_by(Review_no) %>%
+  summarize(afinn_sentiment = sum(value))
+
+# Merge with df
+df_with_sentiment = df_with_sentiment %>%
+  inner_join(sentiment_score, by = "Review_no")
+
+```
+
+
+# Worst review Afinn
+```{R }
+worst_reviews = df_with_sentiment[order(df_with_sentiment$afinn_sentiment)[1],"Review_text"]
+
+for (review in worst_reviews){
+  print(review)
+}
+
+```
+
+#Best Review -  Afinn 
+```{R }
+best_reviews = df_with_sentiment[order(df_with_sentiment$afinn_sentiment, decreasing = TRUE)[1],"Review_text"]
+
+for (review in best_reviews){
+  print(review)
+}
+```
+
+#### Histogram of sentiments score
+```{R }
+# Histogram of sentiment scores
+ggplot(df_with_sentiment, aes(x = afinn_sentiment)) +
+  geom_histogram(binwidth = 1)
+
+```
+
+
+#### Average Sentiment by Title
+```{R }
+
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(stringr)  # For str_wrap function
+
+
+
+# Average Sentiment by Title
+title_sentiment <- df_with_sentiment %>%
+  group_by(Title) %>%
+  summarize(Average_Afinn_Sentiment = mean(afinn_sentiment, na.rm = TRUE))
+
+# Shorten titles
+title_sentiment$Short_Title <- str_wrap(title_sentiment$Title, width = 29)  # Adjust width as needed
+
+# Plotting with adjusted dimensions and shortened titles
+ggplot(title_sentiment, aes(x = reorder(Short_Title, Average_Afinn_Sentiment), y = Average_Afinn_Sentiment, fill = Short_Title)) +
+  geom_bar(stat = "identity", width = 0.8) +  # Adjust the width of the bars (increase from default 0.8)
+  coord_flip() +
+  labs(title = "Average Sentiment Score by Title", x = "Title", y = "Average Sentiment Score") +
+  theme_minimal() +  # Change plot theme
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  # Rotate x-axis labels vertically
+  scale_fill_discrete(name = "Title")  # Rename fill legend
+
+
+```
+
+
+####  Average Sentiment Score by Title
+```{R }
+
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(stringr)  # For str_wrap function
+
+
+
+# Average Sentiment by Title
+title_sentiment <- df_with_sentiment %>%
+  group_by(Title) %>%
+  summarize(Average_Afinn_Sentiment = mean(afinn_sentiment, na.rm = TRUE))
+
+# Shorten titles
+title_sentiment$Short_Title <- str_wrap(title_sentiment$Title, width = 29)  # Adjust width as needed
+
+# Plotting with adjusted dimensions and shortened titles
+ggplot(title_sentiment, aes(x = reorder(Short_Title, Average_Afinn_Sentiment), y = Average_Afinn_Sentiment, fill = Short_Title)) +
+  geom_bar(stat = "identity", width = 0.9) +  # Adjust the width of the bars (increase from default 0.8)
+  coord_flip() +
+  labs(title = "Average Sentiment Score by Title", x = "Title", y = "Average Sentiment Score") +
+  theme_minimal() +  # Change plot theme
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),  # Rotate x-axis labels vertically
+        axis.text.y = element_text(size = 5),  # Adjust the size of y-axis labels
+        plot.margin = margin(l = 15, r = 6, t = 6, b = 8)) +  # Expand the space for the y-axis label
+  scale_fill_discrete(name = "Title")  # Rename fill legend
+
+```
+
+
+#### Box Plot of Afinn Sentiment vs Rating
+```{R }
+
+# Convert Rating to a factor with all levels
+df_with_sentiment$Rating <- factor(df_with_sentiment$Rating, levels = c(1, 2, 3, 4, 5))
+
+ggplot(df_with_sentiment, aes(x = factor(Rating), y = afinn_sentiment)) +
+  geom_boxplot() +
+  labs(title = "Box Plot of Afinn Sentiment vs Rating", x = "Rating", y = "Afinn Sentiment") +
+  scale_x_discrete(limits = c("1", "2", "3", "4", "5"))
+
+```
+
+
+
+
+
+
+#### Applying NRC lexicon
+```{R }
+# Suppress warning messages
+suppressWarnings({
+  # Create dataset containing only words with associated sentiment & adds sentiment column.
+  emotion_data <- clean_tokens %>%
+    inner_join(get_sentiments("nrc"), by = "word")
+})
+
+```
+
+
+
+```{R }
+library(tidyr)
+
+# Calculate Sentiment scores for each review
+emotion_count <- emotion_data %>%
+  group_by(Review_no) %>%
+  count(sentiment)
+
+# Pivots data so that there is a column associated with each emotion
+wide_emotion_data <- emotion_count %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = list(n = 0))
+
+# Merge with df
+df_with_sentiment = df_with_sentiment %>%
+  inner_join(wide_emotion_data, by = "Review_no")
+
+```
+
+
+
+```{r}
+print(df_with_sentiment)
+```
+
+```{r }
+long_df <- df_with_sentiment %>%
+  pivot_longer(cols = c("joy", "positive", "trust", "anticipation", "surprise", "sadness", "negative", "anger", "disgust", "fear"),
+               names_to = "Emotion",
+               values_to = "Intensity")
+
+emotion_scores <- long_df %>%
+  group_by(Title, Emotion) %>%
+  summarize(avg_intensity = mean(Intensity))
+```
+
+
+```{r }
+# Load necessary libraries
+library(ggplot2)
+library(stringr)
+
+
+
+# Shorten the variable names
+short_titles <- str_sub(emotion_scores$Title, 1, 20)  # Extract first 20 characters of each title
+
+# Plot the heatmap
+ggplot(emotion_scores, aes(x = str_wrap(short_titles, width = 20), y = Emotion, fill = avg_intensity)) +
+  geom_tile() +  # Creates the heatmap tiles
+  scale_fill_gradient2(low = "blue", high = "red") +  # Adjust colors
+  labs(x = "Title", y = "Emotion", fill = "Intensity") +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1, lineheight = 1),
+        plot.margin = margin(l = 5))  # Adjust left margin to create more space
+
+
+```
+
+
+
+
+
+<center> <h3> Conclusions drawn from my findings</h3> </center>
+<p>
+Based on the analysis of sentiment scores from Bing, AFINN, and NRC lexicons for a selection of reviews, several conclusions can be drawn:
+
+Bing Sentiment Analysis:
+
+The Bing lexicon provided contrasting sentiment scores for different reviews. The worst review exhibited negative sentiment with a score of -6, while the best review displayed positive sentiment. Additionally, the average sentiment score varied across different titles, indicating fluctuations in the overall sentiment expressed in the reviews.
+AFINN Sentiment Analysis:
+
+Similar to Bing, AFINN lexicon also yielded varying sentiment scores across different reviews. The worst review had a negative sentiment score, whereas the best review demonstrated positive sentiment. This lexicon also indicated differences in sentiment intensity among reviews, highlighting nuances in the emotional content of the texts.
+Comparison of Bing and AFINN Sentiment Scores:
+
+The comparison between Bing and AFINN sentiment scores showed that AFINN identified more instances of sentiment within the analyzed text, with a total of 125 sentiment occurrences compared to 55 identified by Bing. This suggests that AFINN may provide a more detailed analysis of sentiment compared to Bing.
+
+
+NRC Lexicon Analysis:
+The NRC lexicon analysis revealed specific emotions associated with different titles. For instance, the title "The Software Architecture" elicited high levels of positive emotion, while "Trust" was also prominent, indicating a positive emotional tone associated with this title. This suggests that NRC lexicon analysis can provide insight into the emotional nuances of text data beyond simple positive or negative sentiment.
+In conclusion, the sentiment analysis conducted using Bing, AFINN, and NRC lexicons revealed diverse emotional expressions within the analyzed texts. Each lexicon provided unique insights into the sentiment and emotional content of the reviews, demonstrating the importance of selecting appropriate lexicons based on the specific objectives of the analysis. Additionally, the comparison between different lexicons highlighted the importance of considering multiple perspectives to gain a comprehensive understanding of sentiment in textual data.
+</p>
+
+
+
+
+# TASK C: Topic Modelling
+
+### Load the important Libraries
+```{r install_Lib}
+libraries <- c("Matrix", "topicmodels", "stringr", "reshape2", "LDAvis", "jsonlite")
+
+# Comment out after first execution
+#install.packages(libraries)
+
+for (lib in libraries) { 
+  library(lib, character.only=TRUE) #Library takes function names without quotes, character only must be used in a loop of this kind.
+}
+
+```
+
+
+
+ 
+### DATA SELECTION AND SAMPLING 
+
+<p> In this case, I will load a fresh data to a new data frame to do this Topic modelling analysis</p>
+```{R }
+
+library(tibble)
+
+book_reviews <- as_tibble(read.csv(filepath, stringsAsFactors = FALSE))
+
+print(summary(book_reviews))
+```
+
+
+### Find the min, max and average length of review text
+### This will enable me decide the number of words to chose to determine the sample to select
+
+```{R }
+# Tokenize the review text into words
+library(stringr)
+library(dplyr)
+
+book_reviews <- book_reviews %>%
+  mutate(num_words = str_count(Review_text, "\\w+"))  # Count the number of words in each review text
+
+# Find minimum, maximum, and average number of words
+min_words <- min(book_reviews$num_words, na.rm = TRUE)
+max_words <- max(book_reviews$num_words, na.rm = TRUE)
+avg_words <- mean(book_reviews$num_words, na.rm = TRUE)
+
+# Print the results
+print(paste("Minimum number of words:", min_words))
+print(paste("Maximum number of words:", max_words))
+print(paste("Average number of words:", avg_words))
+
+```
+
+
+### Based on the result of the above, 
+### I will filter only rows where review_text contains between 200 and 400 words to be able to extract more context for each topic.
+```{R }
+# Selecting relevant features
+book_reviews <- book_reviews %>%
+  select(c("Title", "Review_text", "Review_title", "Genre")) %>%
+  filter(str_count(Review_text) >= 200 & str_count(Review_text) <= 400)
+
+# Replace values of "unknown" in Genre with NA
+book_reviews$Genre <- na_if(book_reviews$Genre, "unknown")
+
+# Remove rows with missing values
+book_reviews <- na.omit(book_reviews)
+
+# Add a column for book numbers
+book_reviews$book_no <- 1:nrow(book_reviews)
+
+# Sample 1000 rows if there are more than 1000
+if(nrow(book_reviews) > 1000) {
+  set.seed(1)
+  book_reviews <- sample_n(book_reviews, 1000)
+}
+```
+
+
+
+<p> As seen below there are 57 unique genres in the sampled data </P>
+```{R}
+unique_genres <- unique(book_reviews$Genre)
+num_unique_genres <- length(unique_genres)
+print(num_unique_genres)
+```
+
+
+```{R }
+
+head(book_reviews)
+
+```
+
+
+### Ceate term document matrix
+```{R }
+library(tm)
+
+
+# Convert text column to corpus
+corpus <- VCorpus(VectorSource(book_reviews$Review_text))
+
+# Apply cleaning
+corpus <- tm_map(corpus, content_transformer(tolower)) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removeWords, stopwords("en")) %>%
+  tm_map(stripWhitespace) %>%
+  tm_map(stemDocument)
+
+# Convert to a term document matrix
+tdm <- TermDocumentMatrix(corpus, control = list(wordLengths = c(3, 15)))
+
+tdm_matrix <- as.matrix(tdm)
+
+```
+
+
+### check the dimnension of the tdm_matrix
+```{R }
+dim(tdm_matrix)
+
+```
+
+
+
+### plot the frequency distribution
+```{r Word Frequency Distribution}
+library(ggplot2)
+
+
+term_frequencies <- rowSums(tdm_matrix)
+
+# Create a data frame for plotting
+term_frequency_df <- data.frame(term = names(term_frequencies), frequency = term_frequencies)
+
+# Sort the data frame by frequency in descending order and select the top 10
+top_terms <- term_frequency_df %>%
+  arrange(desc(frequency)) %>%
+  head(10)
+
+# Display the top 10 terms
+print(top_terms)
+
+# Create the histogram
+ggplot(term_frequency_df, aes(x = frequency)) +
+  geom_histogram(binwidth = 1) +
+  labs(title = "Histogram of Term Frequencies",
+       x = "Term Frequency",
+       y = "Number of Terms") +
+  theme_minimal()
+```
+
+
+### compute the frequent terms in the created tdm_matrix
+```{R }
+# Compute term frequencies
+term_frequencies <- rowSums(tdm_matrix)
+
+# Create a data frame for plotting
+term_frequency_df <- data.frame(term = names(term_frequencies), frequency = term_frequencies)
+
+# Sort the data frame by frequency in descending order and select the top terms
+top_terms <- term_frequency_df %>% 
+  arrange(desc(frequency)) %>%
+  head(10)  # Adjust the number of top terms as needed
+
+# Display the top terms
+print(top_terms)
+
+# Create a histogram
+ggplot(top_terms, aes(x = term, y = frequency)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Top Term Frequencies", x = "Term", y = "Frequency") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+
+
+```{R }
+# Compute term frequencies
+term_frequencies <- rowSums(tdm_matrix)
+
+# Create a data frame for plotting
+term_frequency_df <- data.frame(term = names(term_frequencies), frequency = term_frequencies)
+
+# Sort the data frame by frequency in descending order and select the top terms
+top_terms <- term_frequency_df %>% 
+  arrange(desc(frequency)) %>%
+  head(10)  # Adjust the number of top terms as needed
+
+# Display the top terms
+print(top_terms)
+
+
+# Create the histogram
+ggplot(term_frequency_df, aes(x = frequency)) + 
+  geom_histogram(binwidth = 1) +
+  labs(title = "Histogram of Term Frequencies",
+       x = "Term Frequency",
+       y = "Number of Terms") + 
+  theme_minimal()
+
+```
+
+
+
+### Selecting terms to remove
+```{R }
+#Find terms that appear in more than 10% of documents 
+frequent_terms <- findFreqTerms(tdm, lowfreq = 0.1 * ncol(tdm_matrix))
+
+#Find terms that appear in less than 1% of documents
+rare_terms <- findFreqTerms(tdm, highfreq =  0.01 * ncol(tdm_matrix))
+
+
+print("Frequent Terms")
+print(frequent_terms)
+print("First 20 Infrequent Terms")
+print(rare_terms[1:20])
+
+
+to_keep <- c("book",
+             "good",
+             "great",
+             "like",
+             "love",
+             "read",
+             "recommend",
+             "story",
+             "well",
+             "will")
+
+to_remove <- frequent_terms[!frequent_terms %in% to_keep]
+```
+
+##Removing Terms
+```{R }
+filtered_tdm_matrix <- tdm_matrix[!rownames(tdm_matrix)  %in% to_remove,]
+filtered_tdm_matrix <- filtered_tdm_matrix[!rownames(filtered_tdm_matrix) %in% rare_terms,]
+
+#Remove 0 sum columns from tdm
+
+
+#calculate col sums
+column_sums <- colSums(filtered_tdm_matrix)
+
+#Identify col that are all zeros
+zero_columns <- which(column_sums == 0)
+
+#remove these columns 
+if(length(zero_columns)>0) {
+  #Remove these columns
+  filtered_tdm_matrix <- filtered_tdm_matrix [, -zero_columns] 
+} else { 
+  #If no columns are all zeros, just use the original matrix
+  Print("No zero columns in TDM MAtrix")
+  }
+
+```
+
+
+### frequency of terms after cleaning
+```{R }
+# Compute term frequencies
+term_frequencies <- rowSums(filtered_tdm_matrix)
+
+# Create a data frame for plotting
+term_frequency_df <- data.frame(term = names(term_frequencies), frequency = term_frequencies)
+
+# Create the histogram
+ggplot(term_frequency_df, aes(x = frequency)) +
+  geom_histogram(binwidth = 1, fill = "blue") +
+  labs(title = "Histogram of Term Frequencies",
+       x = "Frequency",
+       y = "Number of Terms") +
+  theme_minimal()
+
+
+```
+
+
+### Applying LDA
+```{r Initial LDA model}
+library(topicmodels)
+
+dtm <- t(filtered_tdm_matrix)
+lda_model <- LDA(dtm, k = 7)
+```
+
+
+
+
+
+
+### Visualize Topics 
+```{r }
+set.seed(1)
+
+topics <- tidy(lda_model, matrix = "beta")
+topics
+
+top_terms <- topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+top_terms %>%
+  ggplot(aes(x = reorder(term, beta), y = beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free", labeller = labeller(topic = function(x) paste("Topic", x))) +
+  coord_flip() +
+  labs(x = "Terms", y = "Topics")  # Add labels for axes
+
+```
+
+
+
+### Choosing K
+### Choosing the appropriate number of topics (k) in topic modeling is an important 
+### decision, as it directly impacts the interpretability and granularity of the resulting topics. 
+
+```{r Choosing k}
+range_k <- seq(2, 12, by = 1)  # Adjust the range as needed
+perplexities <- sapply(range_k, function(k) {
+  model <- LDA(dtm, k = k, control = list(seed = 1))
+  perplexity(model)
+})
+
+# Plotting perplexities
+plot(range_k, perplexities, type = "b", xlab = "Number of Topics", ylab = "Perplexity")
+```
+
+
+# Interactive Principal Component Space Visualisation
+
+```{r pca visualisation}
+# Install and load the LDAvis package
+install.packages("LDAvis")
+library(LDAvis)
+
+# Fit LDA model
+set.seed(1)
+lda_model <- LDA(dtm, k = 10)
+
+# Create LDAvis object
+lda_vis <- createJSON(phi = posterior(lda_model)$terms,
+                      theta = posterior(lda_model)$topics,
+                      doc.length = rowSums(as.matrix(dtm)),
+                      vocab = colnames(as.matrix(dtm)),
+                      term.frequency = colSums(as.matrix(dtm)))
+
+# Visualize LDA model
+serVis(lda_vis)
+
+```
+
+
+
+
+```{r Final LDA Visualisations}
+
+# Get the topics
+topics <- tidy(lda_model, matrix = "beta")
+
+# Save the plot dimensions
+plot_width <- 40
+plot_height <- 15
+
+# Save the plot as an image
+ggsave("plot.png", width = plot_width, height = plot_height)
+
+# Get the top terms for each topic
+top_terms <- topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+# Select only a subset of topics to display
+selected_topics <- c(1, 2, 3, 4, 5, 6, 7)  # Define the topics you want to display
+
+# Filter the top_terms dataframe to include only the selected topics
+filtered_top_terms <- top_terms %>%
+  filter(topic %in% selected_topics)
+
+# Plot the top terms for the selected topics
+filtered_top_terms %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+# Get the documents (if needed)
+documents <- tidy(lda_model, matrix = "gamma")
+```
+
+
+
+
+```{r }
+library(tidytext)
+
+# Get the topics
+topics <- tidy(lda_model, matrix = "beta")
+
+# Get the top terms for each topic
+top_terms <- topics %>%
+  group_by(topic) %>%
+  top_n(7, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+# Display the top terms for each topic
+top_terms
+
+```
+#### Assigning names to the topics </h3>
+<p>
+Topic 1: <b> Book Recommendations and Appreciation </b>
+Key Terms: book, great, good, know, well, high, also, work, recommend, wonder
+Description: This topic seems to focus on recommending and appreciating books, with descriptors like "great" and "good" indicating positive sentiments towards certain works.<br>
+
+Topic 2:<b> Reading Experience and Recommendations </b>
+Key Terms: book, read, love, recommend, will, easy, work, page, great, new
+Description: This topic revolves around the reading experience and recommendations, suggesting ease of reading ("easy"), enjoyment ("love"), and discovery of new content ("new").<br>
+
+Topic 3: <b> Excellence in Reading and Understanding </b>
+Key Terms: read, book, excel, good, will, inform, great, life, understand, love
+Description: This topic emphasizes excellence in reading and understanding, with terms like "excel" and "inform" indicating a focus on gaining knowledge and insight from books.<br>
+
+Topic 4: <b> Enjoyable Reading and Recommendations </b>
+Key Terms: book, read, enjoy, first, recommend, well, will, write, love, work
+Description: This topic highlights enjoyable reading experiences and recommendations, with terms like "enjoy" and "recommend" suggesting positive sentiments towards certain books.<br>
+
+Topic 5: <b> Appreciation and Reflection </b>
+Key Terms: book, good, love, read, way, well, give, great, think, start
+Description: This topic centers around appreciation and reflection on books, with a focus on the positive attributes of reading ("good," "love," "great") and starting new journeys through literature ("start").<br>
+
+Topic 6: <b> Author Appreciation and Writing Style </b>
+Key Terms: book, like, great, author, people, high, good, write, read, best
+Description: This topic appears to focus on appreciating authors and their writing styles, with terms like "author," "write," and "best" indicating discussions about the quality of writing and authorship.<br>
+
+Topic 7: <b>Reading Enjoyment and Writing Style </b>
+Key Terms: book, like, love, read, will, well, enjoy, way, good, written
+Description: This topic revolves around the enjoyment of reading and appreciation for well-written works, with terms like "love," "enjoy," and "written" suggesting positive sentiments towards certain books and their writing styles.
+</p>
+
+
+
+<h2> conclusions drawn from my findings on the Topic Modelling </h3>
+<p>Based on the findings from the topic modeling analysis of  sampled 1000 book titles with 57 unique genres, several conclusions can be drawn: <br>
+
+Frequent and Infrequent Terms: The analysis revealed that the most frequently occurring terms in the review texts were "book," followed by "read." This suggests that discussions about books and reading are prevalent in the analyzed texts. Additionally, the identification of infrequent terms such as "abandon," "abduct," and "absurd" indicates a wide range of vocabulary used in the reviews, covering diverse topics and themes beyond just typical book-related terms.<br>
+
+LDA Topic Modeling: Initially visualizing 10 topics, the analysis later determined the optimal number of topics to be 8 based on human judgment. Despite the perplexity score suggesting 4 topics, the decision to increase the number of topics to 8 was made based on the coherence and interpretability of the topic-term combinations. This approach underscores the importance of leveraging both automated metrics and human judgment to arrive at an optimal number of topics that best capture the underlying themes and semantics of the text data.<br>
+
+Interpretability and Connection: The chosen 7 topics were deemed more meaningful and coherent in terms of the associations between the identified terms within each topic. This highlights the importance of interpretability in topic modeling, where the goal is not only to identify topics but also to ensure that the topics generated can be easily understood and interpreted by humans. By opting for a higher number of topics that align with human judgment, the analysis aims to provide more nuanced insights into the underlying themes and subjects discussed in the review_text.<br>
+
+In conclusion, the topic modeling analysis of book titles revealed a rich and diverse landscape of topics and themes, with a focus on books and reading as evident from the frequent terms. By leveraging both automated techniques and human judgment, the analysis arrived at an optimal number of topics that enhance the interpretability and coherence of the identified themes, thus providing valuable insights into the underlying content of the book reviews. </p> 
+
+
+
+
+# TASK D - Further exploration 
+
+#### NLP and Spacyr.  - Dependency Parsing, Name Entity Recognition
+```{r }
+# Set CRAN mirror
+options(repos = "https://cran.uk.r-project.org/")
+
+```
+
+
+```{R }
+#install.packages("spacyr")
+```
+
+```{R }
+# Load the spacyr library
+#library(spacyr)
+# d
+
+#Initialize spaCy
+#spacy_initialize()
+```
+
+#### Load data the required library
+```{r spacyr}
+library("spacyr")
+spacy_initialize(model = "en_core_web_sm")
+```
+#### Load data set for further exploration
+```{r }
+dependency_df <- book_reviews
+```
+
+
+```{r using spacy for NER}
+
+corpus <- dependency_df$Review_text
+
+# Perform named entity recognition 
+entities <- spacy_parse(corpus, dependency = TRUE)
+
+# View the entities
+print(head(entities))
+
+```
+
+
+```{r }
+print(colnames(entities))
+
+```
+
+### Calculate and plot the frequency of each named entity type to understand which types of entities are mentioned most 
+```{R }
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+
+# Calculate the frequency of each named entity type
+entity_freq <- entities %>%
+  filter(!is.na(entity)) %>%
+  group_by(entity) %>%
+  summarise(freq = n()) %>%
+  arrange(desc(freq))
+
+# Visualize the frequency distribution
+ggplot(entity_freq, aes(x = reorder(entity, freq), y = freq)) +
+  geom_bar(stat = "identity", fill = "maroon") +
+  labs(x = "Named Entity Type", y = "Frequency", title = "Frequency of Named Entity Types") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+### identify the most frequently mentioned named entities overall or within specific categories in your book reviews_text
+```{R }
+# Filter named entity annotations for specific categories (if applicable)
+# For example, if you want to focus on PERSON entities (characters), you can filter them like this:
+character_entities <- entities %>%
+  filter(entity == "PERSON_B")
+
+# Calculate the frequency of each named entity
+character_freq <- character_entities %>%
+  group_by(token) %>%
+  summarise(freq = n()) %>%
+  arrange(desc(freq))
+
+# Display the top entities
+top_character_entities <- head(character_freq, 10)  # You can adjust the number as needed
+print(top_character_entities)
+
+```
+
+### visualizing the identified most frequently mentioned named entities in the data set
+```{r }
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+
+
+# Filter named entity annotations for specific categories (if applicable)
+# For example, if you want to focus on PERSON entities (characters), you can filter them like this:
+character_entities <- entities %>%
+  filter(entity == "PERSON_B")  # Include both PERSON_I and PERSON_B
+
+# Calculate the frequency of each named entity
+character_freq <- character_entities %>%
+  group_by(token) %>%
+  summarise(freq = n()) %>%
+  arrange(desc(freq))
+
+# Display the top entities
+top_character_entities <- head(character_freq, 10)  # You can adjust the number as needed
+print(top_character_entities)
+
+# Visualize the top entities
+ggplot(top_character_entities, aes(x = reorder(token, freq), y = freq)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Named Entity", y = "Frequency", title = "Top Character Entities") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r }
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+
+
+
+# Calculate the frequency of each part of speech
+pos_freq <- entities %>%
+  group_by(pos) %>%
+  summarise(freq = n()) %>%
+  arrange(desc(freq))
+
+# Display the top parts of speech
+# Visualize the top parts of speech in a bubble chart
+ggplot(pos_freq, aes(x = reorder(pos, freq), y = freq, size = freq)) +
+  geom_point(color = "purple", alpha = 0.9) +
+  scale_size_continuous(range = c(6, 11)) +  # Adjust the range for bubble sizes
+  labs(x = "Part of Speech", y = "Frequency", title = "Top Recognized Parts of Speech") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+
+
+### Addittional models  - (Time Series)
+
+ 
+```{r Load_Data set 1}
+filepath <- 'C:\\Users\\Gabriel Obot\\Desktop\\R-Data mining course work\\MS4S09_CW_Book_Reviews.csv'
+sampled_books <- as_tibble(read.csv(filepath, stringsAsFactors = FALSE)) # Since we have text data we do not want this read as a factor
+
+print(colnames(sampled_books))
+```
+
+```{r }
+
+dim(sampled_books)
+```
+
+
+
+```{R }
+library(stringr)
+
+# Selecting relevant features
+sampled_books <- sampled_books %>%
+  select(c( "Title", "Book_Price", "Reviewer_id", "Rating", "Time", "Review_title",    
+ "Review_text", "Found_helpful_ratio", "Publisher", "First_author", "Genre" )) %>%
+  filter(str_count(Review_text) >= 200 & str_count(Review_text) <= 400)
+
+# Replace values of "unknown" in Genre with NA
+sampled_books$Genre <- na_if(sampled_books$Genre, "unknown")
+
+# Remove rows with missing values
+book_reviews <- na.omit(book_reviews)
+
+# Add a column for book numbers
+book_reviews$book_no <- 1:nrow(book_reviews)
+
+# Sample 1000 rows if there are more than 1000
+if(nrow(sampled_books) > 1000) {
+  set.seed(1)
+  sampled_books <- sample_n(sampled_books, 1000)
+}
+```
+
+
+```{r }
+dim(sampled_books)
+```
+```{r }
+
+
+# Convert Unix timestamp to POSIXct
+sampled_books$Time <- as.POSIXct(as.numeric(sampled_books$Time), origin = "1970-01-01")
+
+# Check the converted Time column
+head(sampled_books$Time)
+
+```
+
+
+### Original date format
+```{r }
+
+
+# Extract date part
+sampled_books$Date <- as.Date(sampled_books$Time)
+
+# Check the new Date column
+head(sampled_books$Date)
+
+```
+
+```{r }
+head(sampled_books$Date)
+```
+
+
+```{r }
+print(colnames(sampled_books))
+```
+
+
+## Additional model - time series
+
+### Plot of review text monthly
+```{r }
+
+
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(zoo)
+
+# Convert 'Date' column to date format
+sampled_books$Date <- as.Date(sampled_books$Date)
+
+# Extract months from the 'Date' column
+sampled_books$Month <- as.yearmon(sampled_books$Date)
+
+# Create a summary of the number of reviews each month
+reviews_by_month <- sampled_books %>%
+  group_by(Month) %>%
+  summarise(Review_count = n())
+
+# Visualize trend of Review_text over time (monthly)
+ggplot(reviews_by_month, aes(x = Month, y = Review_count)) +
+  geom_line(color = "darkgreen") +
+  geom_point(color = "red") +
+  labs(title = "Trend of Review_text Over Time (Monthly)",
+       x = "Month",
+       y = "Number of Reviews") +
+  theme_minimal()
+
+```
+
+
+
+
+### additional model  -  Linear regression model
+```{r }
+# Perform linear regression
+# Perform linear regression
+lm_model <- lm(Rating ~ Book_Price, data = sampled_books)
+
+# Summary of the linear regression model
+summary(lm_model)
+```
+
+
+```{r }
+library(ggplot2)
+
+# Plot linear regression
+ggplot(sampled_books, aes(x = Book_Price, y = Rating)) +
+  geom_point() +  # Scatter plot of the data points
+  geom_smooth(method = "lm", se = FALSE) +  # Add linear regression line
+  labs(x = "Book Price", y = "Rating", title = "Linear Regression of Rating vs. Book Price")
+
+```
+
+<p>Based on the results of the linear regression analysis, it can be concluded that there is insufficient evidence to support a significant linear relationship between the variables Book_Price and Rating. The coefficient for Book_Price was found to be not statistically significant, indicating that changes in Book_Price are not associated with significant changes in Rating. Additionally, the low R-squared value suggests that Book_Price explains very little of the variability observed in Rating. Overall, these findings suggest that other factors beyond Book_Price likely play a more substantial role in determining the Rating of the books.</p>
+
+
+
+
+
+<b> Discussion of future work </b> <br>
+<p>
+In considering future work based on our sentiment analysis findings, there are several exciting directions that could be explored. We could delve deeper into improving the accuracy of sentiment analysis by trying out more advanced machine learning techniques or neural network models.<br> 
+
+It would be fascinating to see how sentiment analysis performs in different languages or cultural contexts, which could give us a broader understanding of how people express emotions through text. Moreover, we could combine sentiment analysis with other natural language processing tasks like topic modeling or named entity recognition to uncover more nuanced insights from text data. Imagine tracking changes in sentiment over time or analyzing sentiments in real-time social media posts to see how opinions evolve or respond to current events. Lastly, investigating how sentiment impacts real-world outcomes such as customer behavior or product sales could have significant implications for industries like marketing and public relations.<br>
+
+As we delve deeper into the realm of AI and Natural Language Processing (NLP), it's imperative to consider the ethical and security implications inherent in these technologies. With the increasing reliance on AI-driven systems to analyze and interpret vast amounts of textual data, the issue of data biases becomes paramount. We must actively work to mitigate biases in our datasets to ensure that our NLP models provide fair and unbiased results across diverse demographic groups. Moreover, as AI continues to evolve, the risk of cyber attacks exploiting vulnerabilities in data and NLP systems grows as well. Safeguarding against these threats requires robust security measures and continuous vigilance to protect sensitive information and maintain the integrity of NLP technologies. Additionally, ensuring user privacy and responsible deployment of NLP tools are essential considerations. By addressing these ethical and security challenges head-on, we can foster trust in AI technologies and pave the way for their responsible and beneficial integration into various aspects of society.
+</P>
